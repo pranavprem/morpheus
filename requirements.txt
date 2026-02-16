@@ -4,4 +4,4 @@ discord.py==2.3.2
 python-dotenv==1.0.0
 httpx==0.25.2
 pydantic==2.5.0
-slowapi==0.1.9
+slowapi==0.1.9pydantic-settings
