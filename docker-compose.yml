@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  morpheus:
+    build: .
+    container_name: morpheus-gatekeeper
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Load environment variables from .env file
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - MORPHEUS_API_KEY=${MORPHEUS_API_KEY}
+      - VAULTWARDEN_URL=${VAULTWARDEN_URL}
+      - VAULTWARDEN_MASTER_PASSWORD=${VAULTWARDEN_MASTER_PASSWORD}
+      - DISCORD_APPROVAL_CHANNEL_ID=${DISCORD_APPROVAL_CHANNEL_ID}
+      - DISCORD_LOG_CHANNEL_ID=${DISCORD_LOG_CHANNEL_ID}
+      - DISCORD_APPROVER_ID=${DISCORD_APPROVER_ID}
+      - APPROVAL_TIMEOUT_SECONDS=${APPROVAL_TIMEOUT_SECONDS}
+      - HOST=${HOST:-0.0.0.0}
+      - PORT=${PORT:-8000}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      # Mount logs directory for persistent logging
+      - ./logs:/app/logs
+    networks:
+      - morpheus-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  morpheus-network:
+    driver: bridge
+
+volumes:
+  morpheus-logs:
+    driver: local
