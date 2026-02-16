@@ -3,22 +3,22 @@
 # Build the Docker image
 build:
 	@echo "🔨 Building Morpheus Docker image..."
-	docker-compose build
+	docker compose build
 
 # Start services
 up:
 	@echo "🚀 Starting Morpheus..."
-	docker-compose up -d
+	docker compose up -d
 
 # Stop services
 down:
 	@echo "🛑 Stopping Morpheus..."
-	docker-compose down
+	docker compose down
 
 # View logs
 logs:
 	@echo "📋 Viewing Morpheus logs..."
-	docker-compose logs -f
+	docker compose logs -f
 
 # Restart services
 restart: down up
@@ -26,12 +26,12 @@ restart: down up
 # Clean up containers and images
 clean:
 	@echo "🧹 Cleaning up Docker resources..."
-	docker-compose down --rmi all --volumes --remove-orphans
+	docker compose down --rmi all --volumes --remove-orphans
 
 # Show service status
 status:
 	@echo "📊 Morpheus service status:"
-	docker-compose ps
+	docker compose ps
 
 # Check health
 health:
