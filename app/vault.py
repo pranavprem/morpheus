@@ -186,10 +186,11 @@ class VaultManager:
                     "uris": matching_item.get("login", {}).get("uris", []),
                 })
             
-            # Add custom fields
+            # Add custom fields (exclude internal control fields)
+            internal_fields = {"scopes", "auto_approve"}
             for field in custom_fields:
                 field_name = field.get("name", "")
-                if field_name.lower() != "scopes":  # Don't expose the scopes field
+                if field_name.lower() not in internal_fields:
                     credential_data[field_name] = field.get("value")
             
             logger.info(f"Successfully retrieved credential for {service}:{scope}")

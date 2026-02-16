@@ -173,7 +173,8 @@ class MorpheusBot(commands.Bot):
         reason: str, 
         approved: bool, 
         request_id: str,
-        duration_ms: Optional[int] = None
+        duration_ms: Optional[int] = None,
+        auto_approved: bool = False
     ):
         """
         Log a credential request to the log channel.
@@ -193,7 +194,10 @@ class MorpheusBot(commands.Bot):
                 return
             
             # Create log embed
-            status = "APPROVED" if approved else "DENIED"
+            if auto_approved:
+                status = "AUTO-APPROVED"
+            else:
+                status = "APPROVED" if approved else "DENIED"
             color = discord.Color.green() if approved else discord.Color.red()
             
             embed = discord.Embed(

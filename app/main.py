@@ -229,15 +229,22 @@ async def request_credential(
                 message="Service or scope not found, or scope not allowed"
             )
         
-        # Request Discord approval
-        logger.info(f"Request {request_id}: Requesting Discord approval...")
+        # Check if this credential has auto_approve enabled
+        auto_approve = credential.get("auto_approve", "").lower() == "true"
         
-        approved = await bot.request_approval(
-            service=request_data.service,
-            scope=request_data.scope,
-            reason=request_data.reason,
-            request_id=request_id
-        )
+        if auto_approve:
+            logger.info(f"Request {request_id}: Auto-approved (auto_approve=true on vault item)")
+            approved = True
+        else:
+            # Request Discord approval
+            logger.info(f"Request {request_id}: Requesting Discord approval...")
+            
+            approved = await bot.request_approval(
+                service=request_data.service,
+                scope=request_data.scope,
+                reason=request_data.reason,
+                request_id=request_id
+            )
         
         duration_ms = int((time.time() - start_time) * 1000)
         
@@ -248,7 +255,8 @@ async def request_credential(
             reason=request_data.reason,
             approved=approved,
             request_id=request_id,
-            duration_ms=duration_ms
+            duration_ms=duration_ms,
+            auto_approved=auto_approve
         )
         
         if approved:
