@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
+# One-time credential pickup store (token -> credential data)
+_credential_store: Dict[str, Dict[str, Any]] = {}
+
 # Pydantic models
 class CredentialRequest(BaseModel):
     """Model for credential requests."""
@@ -250,13 +253,21 @@ async def request_credential(
         
         if approved:
             logger.info(f"Request {request_id}: APPROVED")
+            # Store credential for one-time pickup
+            pickup_token = str(uuid.uuid4())
+            _credential_store[pickup_token] = {
+                "credential": credential,
+                "created": time.time(),
+                "service": request_data.service,
+                "scope": request_data.scope,
+            }
             return CredentialResponse(
                 service=request_data.service,
                 scope=request_data.scope,
                 request_id=request_id,
                 approved=True,
-                credential=credential,
-                message="Access approved"
+                credential=None,
+                message=f"Access approved. Pickup token: {pickup_token}"
             )
         else:
             logger.info(f"Request {request_id}: DENIED")
@@ -285,6 +296,31 @@ async def request_credential(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
         )
+
+
+@app.post("/pickup")
+@limiter.limit("10/minute")
+async def pickup_credential(
+    request: Request,
+    api_key: str = Depends(verify_api_key)
+):
+    """One-time credential pickup. Token is destroyed after use."""
+    body = await request.json()
+    token = body.get("token", "")
+    
+    if token not in _credential_store:
+        raise HTTPException(status_code=404, detail="Invalid or expired pickup token")
+    
+    data = _credential_store.pop(token)  # One-time use — delete immediately
+    
+    # Expire stale tokens (>5 min old)
+    now = time.time()
+    expired = [k for k, v in _credential_store.items() if now - v["created"] > 300]
+    for k in expired:
+        del _credential_store[k]
+    
+    logger.info(f"Credential picked up for {data['service']}:{data['scope']}")
+    return {"credential": data["credential"]}
 
 
 @app.exception_handler(HTTPException)
