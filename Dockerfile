@@ -20,11 +20,12 @@ RUN curl -L "https://github.com/bitwarden/clients/releases/download/cli-v2024.2.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY app/ ./app/
-
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash morpheus
+
+# Copy application code and set ownership
+COPY --chown=morpheus:morpheus app/ ./app/
+
 USER morpheus
 
 # Health check
