@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     
     # Vaultwarden Configuration
     vaultwarden_url: str = "https://vault.pranavprem.com"
+    vaultwarden_email: str = "neo@vault.pranavprem.com"
     vaultwarden_master_password: str
     
     # Security Configuration
