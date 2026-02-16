@@ -44,24 +44,22 @@ class VaultManager:
                 "bw", "config", "server", settings.vaultwarden_url
             ])
             
-            # Login and get session key using environment variable for password
-            import os
-            env = os.environ.copy()
-            env["BW_PASSWORD"] = settings.vaultwarden_master_password
-            
+            # Login and get session key
             process = await asyncio.create_subprocess_exec(
                 "bw", "login", "--raw", "--nointeraction",
                 settings.vaultwarden_email,
-                "--passwordenv", "BW_PASSWORD",
+                settings.vaultwarden_master_password,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=env
             )
             stdout, stderr = await process.communicate()
             
             if process.returncode != 0:
-                # Maybe already logged in, try unlock instead
-                return await self.unlock()
+                error = stderr.decode().strip()
+                if "already logged in" in error.lower():
+                    return await self.unlock()
+                logger.error(f"Login failed: {error}")
+                return False
             
             result = stdout.decode().strip()
             
@@ -87,16 +85,11 @@ class VaultManager:
                 return True
             except:
                 # Need to unlock
-                import os
-                env = os.environ.copy()
-                env["BW_PASSWORD"] = settings.vaultwarden_master_password
-                
                 process = await asyncio.create_subprocess_exec(
                     "bw", "unlock", "--raw", "--nointeraction",
-                    "--passwordenv", "BW_PASSWORD",
+                    settings.vaultwarden_master_password,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    env=env
                 )
                 stdout, stderr = await process.communicate()
                 
