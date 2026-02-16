@@ -158,16 +158,33 @@ class VaultManager:
                 logger.warning(f"Scope '{scope}' not allowed for service '{service}'. Allowed: {allowed_scopes}")
                 return None
             
-            # Extract credential data based on scope
+            # Extract credential data based on item type
+            # Bitwarden types: 1=login, 2=secure note, 3=card, 4=identity
+            item_type = matching_item.get("type", 1)
+            
             credential_data = {
                 "service": service,
                 "scope": scope,
                 "name": matching_item.get("name"),
-                "username": matching_item.get("login", {}).get("username"),
-                "password": matching_item.get("login", {}).get("password"),
                 "notes": matching_item.get("notes"),
-                "uris": matching_item.get("login", {}).get("uris", [])
             }
+            
+            if item_type == 3:  # Card
+                card = matching_item.get("card", {})
+                credential_data.update({
+                    "cardholderName": card.get("cardholderName"),
+                    "number": card.get("number"),
+                    "expMonth": card.get("expMonth"),
+                    "expYear": card.get("expYear"),
+                    "code": card.get("code"),
+                    "brand": card.get("brand"),
+                })
+            else:  # Login or other
+                credential_data.update({
+                    "username": matching_item.get("login", {}).get("username"),
+                    "password": matching_item.get("login", {}).get("password"),
+                    "uris": matching_item.get("login", {}).get("uris", []),
+                })
             
             # Add custom fields
             for field in custom_fields:
