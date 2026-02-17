@@ -261,10 +261,11 @@ async def request_credential(
         
         if approved:
             logger.info(f"Request {request_id}: APPROVED")
-            # Store credential for one-time pickup
+            # Store credential for one-time pickup (strip internal fields)
             pickup_token = str(uuid.uuid4())
+            clean_credential = {k: v for k, v in credential.items() if k != "auto_approve"}
             _credential_store[pickup_token] = {
-                "credential": credential,
+                "credential": clean_credential,
                 "created": time.time(),
                 "service": request_data.service,
                 "scope": request_data.scope,

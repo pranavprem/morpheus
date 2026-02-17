@@ -186,8 +186,8 @@ class VaultManager:
                     "uris": matching_item.get("login", {}).get("uris", []),
                 })
             
-            # Add custom fields (exclude internal control fields)
-            internal_fields = {"scopes", "auto_approve"}
+            # Add custom fields (exclude internal control fields from credential payload)
+            internal_fields = {"scopes"}
             for field in custom_fields:
                 field_name = field.get("name", "")
                 if field_name.lower() not in internal_fields:
