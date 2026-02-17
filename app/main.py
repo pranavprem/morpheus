@@ -230,7 +230,6 @@ async def request_credential(
             )
         
         # Check if this credential has auto_approve enabled
-        logger.info(f"Request {request_id}: credential keys={list(credential.keys())}, auto_approve_value={credential.get('auto_approve')!r}")
         auto_approve = str(credential.get("auto_approve", "")).lower() == "true"
         
         if auto_approve:
