@@ -25,14 +25,16 @@ Morpheus is a **intentionally dumb** credential gatekeeper that guards Vaultward
 
 ## 🔄 Request Flow
 
-1. **Neo** sends HTTP request: `POST /request` with `{service, scope, reason}` + API key
+1. **Neo** sends `POST /request` with `{service, scope, reason}` + API key
 2. **Morpheus** validates API key and checks if service/scope exists in vault
 3. Posts approval request to Discord channel `#morpheus-approvals`
-4. Waits for **Pranav** to react with ✅ (approve) or ❌ (deny)
-5. **If approved**: fetches credential from Vaultwarden, returns in HTTP response
-6. **If denied**: returns 403 Forbidden
-7. **Timeout**: 10 minutes → auto-deny (fail-safe)
-8. Logs everything to Discord channel `#gatekeeper-logs`
+4. Returns a `request_id` immediately (non-blocking)
+5. **Pranav** reacts with ✅ (approve) or ❌ (deny) on Discord
+6. **Neo** polls `POST /pickup` with the `request_id`
+7. **If approved**: Morpheus fetches credential from Vaultwarden, returns it
+8. **If denied**: returns denial
+9. **Timeout**: 10 minutes → auto-deny (fail-safe)
+10. All actions logged to Discord channel `#gatekeeper-logs`
 
 ## 🛡️ Security Features
 
@@ -94,7 +96,7 @@ That's it! Morpheus is now running on `http://localhost:8000`
 
 ### `POST /request`
 
-Request a credential with Discord approval.
+Submit a credential request for Discord approval. This does **not** return credentials — it starts the approval flow.
 
 **Headers:**
 - `X-API-Key: your_api_key`
@@ -109,11 +111,33 @@ Request a credential with Discord approval.
 }
 ```
 
+**Response:**
+```json
+{
+  "request_id": "a1b2c3d4",
+  "status": "pending",
+  "message": "Request submitted, waiting for approval"
+}
+```
+
+### `POST /pickup`
+
+Fetch credentials for an approved request. Poll this endpoint after submitting a request.
+
+**Headers:**
+- `X-API-Key: your_api_key`
+- `Content-Type: application/json`
+
+**Body:**
+```json
+{
+  "request_id": "a1b2c3d4"
+}
+```
+
 **Response (approved):**
 ```json
 {
-  "service": "aws-prod",
-  "scope": "read-only",
   "request_id": "a1b2c3d4",
   "approved": true,
   "credential": {
@@ -125,6 +149,24 @@ Request a credential with Discord approval.
     "custom_field": "value"
   },
   "message": "Access approved"
+}
+```
+
+**Response (pending):**
+```json
+{
+  "request_id": "a1b2c3d4",
+  "approved": false,
+  "message": "Request still pending approval"
+}
+```
+
+**Response (denied/timeout):**
+```json
+{
+  "request_id": "a1b2c3d4",
+  "approved": false,
+  "message": "Request denied"
 }
 ```
 
