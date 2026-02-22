@@ -281,6 +281,12 @@ class VaultManager:
                 has_password = bool(login_data.get("password"))
                 logger.debug(f"Login data — username: {login_data.get('username')}, has_password: {has_password}")
             
+            # Check for auto_approve flag in custom fields
+            for field in custom_fields:
+                if field.get("name", "").lower() == "auto_approve":
+                    credential_data["auto_approve"] = field.get("value", "")
+                    break
+            
             # Add custom fields (exclude internal control fields)
             internal_fields = {"scopes", "scope", "auto_approve"}
             for field in custom_fields:
