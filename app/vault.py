@@ -14,9 +14,13 @@ class VaultManager:
     
     def __init__(self):
         self.session_key: Optional[str] = None
+        self._logged_in: bool = False
     
-    async def _run_command(self, cmd: list[str]) -> str:
+    async def _run_command(self, cmd: list[str], timeout: int = 30) -> str:
         """Run a Bitwarden CLI command and return stdout."""
+        cmd_str = " ".join(cmd[:3]) + ("..." if len(cmd) > 3 else "")
+        logger.debug(f"Running command: {cmd_str}")
+        
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -24,85 +28,159 @@ class VaultManager:
                 stderr=asyncio.subprocess.PIPE
             )
             
-            stdout, stderr = await process.communicate()
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.communicate()
+                logger.error(f"Command timed out after {timeout}s: {cmd_str}")
+                raise RuntimeError(f"Command timed out: {cmd_str}")
+            
+            stdout_text = stdout.decode().strip()
+            stderr_text = stderr.decode().strip()
             
             if process.returncode != 0:
-                error_msg = stderr.decode().strip()
-                logger.error(f"Bitwarden CLI error: {error_msg}")
-                raise RuntimeError(f"Bitwarden CLI failed: {error_msg}")
+                logger.error(f"Command failed (rc={process.returncode}): {cmd_str}")
+                logger.error(f"  stderr: {stderr_text}")
+                if stdout_text:
+                    logger.error(f"  stdout: {stdout_text}")
+                raise RuntimeError(f"Bitwarden CLI failed: {stderr_text}")
             
-            return stdout.decode().strip()
+            logger.debug(f"Command succeeded: {cmd_str}")
+            return stdout_text
+            
+        except RuntimeError:
+            raise
         except Exception as e:
-            logger.error(f"Failed to execute Bitwarden command: {e}")
+            logger.error(f"Failed to execute command {cmd_str}: {type(e).__name__}: {e}")
             raise
     
     async def login(self) -> bool:
         """Login to Bitwarden and establish session."""
         try:
             # Configure server URL
+            logger.info(f"Configuring Vaultwarden server: {settings.vaultwarden_url}")
             await self._run_command([
                 "bw", "config", "server", settings.vaultwarden_url
             ])
             
-            # Login and get session key
+            # Check current login status first
+            try:
+                status_output = await self._run_command(["bw", "status"])
+                status_data = json.loads(status_output)
+                current_status = status_data.get("status", "unknown")
+                logger.info(f"Current vault status: {current_status}")
+                
+                if current_status == "unauthenticated":
+                    # Need to login
+                    logger.info("Vault is unauthenticated, logging in...")
+                    process = await asyncio.create_subprocess_exec(
+                        "bw", "login", "--raw", "--nointeraction",
+                        settings.vaultwarden_email,
+                        settings.vaultwarden_master_password,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    stdout, stderr = await asyncio.wait_for(
+                        process.communicate(), timeout=30
+                    )
+                    
+                    if process.returncode != 0:
+                        error = stderr.decode().strip()
+                        logger.error(f"Login failed (rc={process.returncode}): {error}")
+                        return False
+                    
+                    self.session_key = stdout.decode().strip()
+                    self._logged_in = True
+                    logger.info("Successfully logged into Vaultwarden")
+                    return True
+                    
+                elif current_status == "locked":
+                    # Already logged in, just need to unlock
+                    logger.info("Vault is locked, skipping login — will unlock")
+                    self._logged_in = True
+                    return True
+                    
+                elif current_status == "unlocked":
+                    # Already good to go
+                    logger.info("Vault is already unlocked")
+                    self._logged_in = True
+                    # Get session key if we don't have one
+                    if not self.session_key:
+                        return await self._do_unlock()
+                    return True
+                    
+                else:
+                    logger.warning(f"Unknown vault status: {current_status}")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"Failed to check vault status: {type(e).__name__}: {e}")
+                return False
+            
+        except Exception as e:
+            logger.error(f"Login process failed: {type(e).__name__}: {e}")
+            return False
+    
+    async def _do_unlock(self) -> bool:
+        """Perform the actual unlock operation."""
+        logger.info("Unlocking vault...")
+        try:
             process = await asyncio.create_subprocess_exec(
-                "bw", "login", "--raw", "--nointeraction",
-                settings.vaultwarden_email,
+                "bw", "unlock", "--raw", "--nointeraction",
                 settings.vaultwarden_master_password,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await process.communicate()
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=30
+            )
             
             if process.returncode != 0:
                 error = stderr.decode().strip()
-                if "already logged in" in error.lower():
-                    return await self.unlock()
-                logger.error(f"Login failed: {error}")
+                logger.error(f"Unlock failed (rc={process.returncode}): {error}")
                 return False
             
-            result = stdout.decode().strip()
-            
-            self.session_key = result
-            logger.info("Successfully logged into Vaultwarden")
+            self.session_key = stdout.decode().strip()
+            logger.info(f"Vault unlocked successfully (session key length: {len(self.session_key)})")
             return True
             
+        except asyncio.TimeoutError:
+            logger.error("Unlock command timed out after 30s")
+            return False
         except Exception as e:
-            logger.error(f"Failed to login to Vaultwarden: {e}")
+            logger.error(f"Unlock failed: {type(e).__name__}: {e}")
             return False
     
     async def unlock(self) -> bool:
-        """Unlock the vault if needed."""
+        """Unlock the vault, logging in first if needed."""
         try:
-            if not self.session_key:
-                await self.login()
+            if not self._logged_in:
+                logger.info("Not logged in yet, calling login first...")
+                if not await self.login():
+                    logger.error("Login failed, cannot unlock")
+                    return False
             
-            # Test if vault is already unlocked
-            try:
-                await self._run_command([
-                    "bw", "list", "items", "--session", self.session_key
-                ])
-                return True
-            except:
-                # Need to unlock
-                process = await asyncio.create_subprocess_exec(
-                    "bw", "unlock", "--raw", "--nointeraction",
-                    settings.vaultwarden_master_password,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, stderr = await process.communicate()
-                
-                if process.returncode != 0:
-                    raise RuntimeError(f"Unlock failed: {stderr.decode().strip()}")
-                
-                result = stdout.decode().strip()
-                self.session_key = result
-                logger.info("Vault unlocked successfully")
-                return True
+            # If login already gave us a session key, verify it works
+            if self.session_key:
+                try:
+                    logger.debug("Testing existing session key...")
+                    await self._run_command([
+                        "bw", "sync", "--session", self.session_key
+                    ])
+                    logger.info("Existing session key is valid")
+                    return True
+                except Exception as e:
+                    logger.warning(f"Existing session key invalid: {e}, re-unlocking...")
+                    self.session_key = None
+            
+            # Unlock to get a fresh session key
+            return await self._do_unlock()
                 
         except Exception as e:
-            logger.error(f"Failed to unlock vault: {e}")
+            logger.error(f"Unlock process failed: {type(e).__name__}: {e}")
             return False
     
     async def get_credential(self, service: str, scope: str) -> Optional[Dict[str, Any]]:
@@ -116,17 +194,22 @@ class VaultManager:
         Returns:
             Dictionary containing credential data, or None if not found
         """
+        logger.info(f"Getting credential for {service}:{scope}")
+        
         try:
             if not await self.unlock():
+                logger.error(f"Cannot get credential — vault unlock failed")
                 return None
             
             # Search for items by name
+            logger.debug(f"Searching vault for service: {service}")
             search_result = await self._run_command([
                 "bw", "list", "items", "--search", service, 
                 "--session", self.session_key
             ])
             
             items = json.loads(search_result)
+            logger.debug(f"Found {len(items)} items matching '{service}'")
             
             if not items:
                 logger.warning(f"No items found for service: {service}")
@@ -135,12 +218,15 @@ class VaultManager:
             # Find the exact match
             matching_item = None
             for item in items:
-                if item.get("name", "").lower() == service.lower():
+                item_name = item.get("name", "")
+                if item_name.lower() == service.lower():
                     matching_item = item
+                    logger.debug(f"Exact match found: {item_name}")
                     break
             
             if not matching_item:
                 logger.warning(f"No exact match found for service: {service}")
+                logger.debug(f"Available items: {[i.get('name') for i in items]}")
                 return None
             
             # Check if the requested scope exists in custom fields
@@ -148,19 +234,25 @@ class VaultManager:
             allowed_scopes = []
             
             for field in custom_fields:
-                if field.get("name", "").lower() == "scopes":
+                field_name = field.get("name", "").lower()
+                # Accept both "scope" and "scopes" field names
+                if field_name in ("scopes", "scope"):
                     allowed_scopes = field.get("value", "").split(",")
+                    logger.debug(f"Found scopes field '{field.get('name')}': {field.get('value')}")
                     break
             
-            allowed_scopes = [s.strip().lower() for s in allowed_scopes]
+            allowed_scopes = [s.strip().lower() for s in allowed_scopes if s.strip()]
+            logger.debug(f"Allowed scopes: {allowed_scopes}")
             
             if scope.lower() not in allowed_scopes:
                 logger.warning(f"Scope '{scope}' not allowed for service '{service}'. Allowed: {allowed_scopes}")
                 return None
             
+            logger.info(f"Scope '{scope}' verified for service '{service}'")
+            
             # Extract credential data based on item type
-            # Bitwarden types: 1=login, 2=secure note, 3=card, 4=identity
             item_type = matching_item.get("type", 1)
+            logger.debug(f"Item type: {item_type}")
             
             credential_data = {
                 "service": service,
@@ -180,14 +272,17 @@ class VaultManager:
                     "brand": card.get("brand"),
                 })
             else:  # Login or other
+                login_data = matching_item.get("login", {})
                 credential_data.update({
-                    "username": matching_item.get("login", {}).get("username"),
-                    "password": matching_item.get("login", {}).get("password"),
-                    "uris": matching_item.get("login", {}).get("uris", []),
+                    "username": login_data.get("username"),
+                    "password": login_data.get("password"),
+                    "uris": login_data.get("uris", []),
                 })
+                has_password = bool(login_data.get("password"))
+                logger.debug(f"Login data — username: {login_data.get('username')}, has_password: {has_password}")
             
-            # Add custom fields (exclude internal control fields from credential payload)
-            internal_fields = {"scopes"}
+            # Add custom fields (exclude internal control fields)
+            internal_fields = {"scopes", "scope", "auto_approve"}
             for field in custom_fields:
                 field_name = field.get("name", "")
                 if field_name.lower() not in internal_fields:
@@ -197,16 +292,18 @@ class VaultManager:
             return credential_data
             
         except Exception as e:
-            logger.error(f"Failed to get credential for {service}:{scope}: {e}")
+            logger.error(f"Failed to get credential for {service}:{scope}: {type(e).__name__}: {e}")
             return None
     
     async def list_services(self) -> list[str]:
         """List all available services (item names) in the vault."""
+        logger.info("Listing available services...")
+        
         try:
             if not await self.unlock():
+                logger.error("Cannot list services — vault unlock failed")
                 return []
             
-            # Get all items
             result = await self._run_command([
                 "bw", "list", "items", "--session", self.session_key
             ])
@@ -217,21 +314,20 @@ class VaultManager:
             for item in items:
                 name = item.get("name")
                 if name:
-                    # Check if item has scopes defined
                     custom_fields = item.get("fields", [])
                     has_scopes = any(
-                        field.get("name", "").lower() == "scopes" 
+                        field.get("name", "").lower() in ("scopes", "scope")
                         for field in custom_fields
                     )
                     
                     if has_scopes:
                         services.append(name)
             
-            logger.info(f"Found {len(services)} services with scopes")
+            logger.info(f"Found {len(services)} services with scopes: {services}")
             return sorted(services)
             
         except Exception as e:
-            logger.error(f"Failed to list services: {e}")
+            logger.error(f"Failed to list services: {type(e).__name__}: {e}")
             return []
     
     async def logout(self):
@@ -239,6 +335,7 @@ class VaultManager:
         try:
             await self._run_command(["bw", "logout"])
             self.session_key = None
+            self._logged_in = False
             logger.info("Logged out from Vaultwarden")
         except Exception as e:
             logger.error(f"Failed to logout: {e}")
