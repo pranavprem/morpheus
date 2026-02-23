@@ -58,5 +58,15 @@ help:
 	@echo "  2. Run 'make build && make up'"
 	@echo "  3. Check status with 'make health'"
 
+# Pull latest, rebuild, and redeploy
+redeploy:
+	@echo "🔄 Pulling latest changes..."
+	git pull
+	@echo "🔨 Building fresh image..."
+	docker compose build --no-cache
+	@echo "♻️  Redeploying Morpheus..."
+	docker compose up -d
+	@echo "✅ Morpheus redeployed."
+
 # Default target
 all: help
