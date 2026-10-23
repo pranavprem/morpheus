@@ -1,8 +1,9 @@
-fastapi==0.104.1
+fastapi==0.133.0
 uvicorn[standard]==0.24.0
 discord.py==2.3.2
-python-dotenv==1.0.0
+python-dotenv==1.2.2
 httpx==0.25.2
-pydantic==2.5.0
+pydantic==2.7.0
 pydantic-settings
 slowapi==0.1.9
+anyio>=4.14.2
